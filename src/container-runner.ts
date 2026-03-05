@@ -220,7 +220,9 @@ function readToolEnv(): Record<string, string> {
   const ghPaths = ['gh', '/opt/homebrew/bin/gh', '/usr/local/bin/gh'];
   for (const ghBin of ghPaths) {
     try {
-      const token = execSync(`${ghBin} auth token 2>/dev/null`, { encoding: 'utf-8' }).trim();
+      const token = execSync(`${ghBin} auth token 2>/dev/null`, {
+        encoding: 'utf-8',
+      }).trim();
       if (token) {
         env.GH_TOKEN = token;
         break;
@@ -230,7 +232,9 @@ function readToolEnv(): Record<string, string> {
     }
   }
   if (!env.GH_TOKEN) {
-    logger.debug('gh auth token not available from any path, skipping GH_TOKEN');
+    logger.debug(
+      'gh auth token not available from any path, skipping GH_TOKEN',
+    );
   }
 
   // Git user config from .env
