@@ -30,9 +30,15 @@ export class GroupQueue {
   private groups = new Map<string, GroupState>();
   private activeCount = 0;
   private waitingGroups: string[] = [];
-  private processMessagesFn: ((groupJid: string) => Promise<boolean>) | null =
-    null;
+  private processMessagesFn:
+    | ((groupJid: string) => Promise<boolean | 'permanent'>)
+    | null = null;
   private shuttingDown = false;
+  private runningTaskIds = new Set<string>();
+
+  onMaxRetriesExceeded:
+    | ((groupJid: string, retryCount: number) => Promise<void>)
+    | null = null;
 
   private getGroup(groupJid: string): GroupState {
     let state = this.groups.get(groupJid);
@@ -53,7 +59,9 @@ export class GroupQueue {
     return state;
   }
 
-  setProcessMessagesFn(fn: (groupJid: string) => Promise<boolean>): void {
+  setProcessMessagesFn(
+    fn: (groupJid: string) => Promise<boolean | 'permanent'>,
+  ): void {
     this.processMessagesFn = fn;
   }
 
@@ -93,6 +101,12 @@ export class GroupQueue {
     // Prevent double-queuing of the same task
     if (state.pendingTasks.some((t) => t.id === taskId)) {
       logger.debug({ groupJid, taskId }, 'Task already queued, skipping');
+      return;
+    }
+
+    // Prevent re-queuing a task that is currently running
+    if (this.runningTaskIds.has(taskId)) {
+      logger.debug({ groupJid, taskId }, 'Task already running, skipping');
       return;
     }
 
@@ -205,8 +219,16 @@ export class GroupQueue {
 
     try {
       if (this.processMessagesFn) {
-        const success = await this.processMessagesFn(groupJid);
-        if (success) {
+        const result = await this.processMessagesFn(groupJid);
+        if (result === true) {
+          state.retryCount = 0;
+        } else if (result === 'permanent') {
+          // Deterministic failure — skip retries, notify immediately
+          logger.error(
+            { groupJid },
+            'Permanent failure detected, skipping retries',
+          );
+          await this.onMaxRetriesExceeded?.(groupJid, state.retryCount);
           state.retryCount = 0;
         } else {
           this.scheduleRetry(groupJid, state);
@@ -231,6 +253,7 @@ export class GroupQueue {
     state.idleWaiting = false;
     state.isTaskContainer = true;
     this.activeCount++;
+    this.runningTaskIds.add(task.id);
 
     logger.debug(
       { groupJid, taskId: task.id, activeCount: this.activeCount },
@@ -242,6 +265,7 @@ export class GroupQueue {
     } catch (err) {
       logger.error({ groupJid, taskId: task.id, err }, 'Error running task');
     } finally {
+      this.runningTaskIds.delete(task.id);
       state.active = false;
       state.isTaskContainer = false;
       state.process = null;
@@ -258,6 +282,9 @@ export class GroupQueue {
       logger.error(
         { groupJid, retryCount: state.retryCount },
         'Max retries exceeded, dropping messages (will retry on next incoming message)',
+      );
+      this.onMaxRetriesExceeded?.(groupJid, state.retryCount).catch((err) =>
+        logger.error({ groupJid, err }, 'Error in onMaxRetriesExceeded callback'),
       );
       state.retryCount = 0;
       return;

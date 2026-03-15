@@ -246,6 +246,10 @@ function readToolEnv(): Record<string, string> {
   ]);
   Object.assign(env, gitEnv);
 
+  // Slack user token for on-demand message lookups
+  const slackEnv = readEnvFile(['SLACK_USER_TOKEN']);
+  Object.assign(env, slackEnv);
+
   return env;
 }
 
@@ -436,7 +440,7 @@ export async function runContainerAgent(
 
     const killOnTimeout = () => {
       timedOut = true;
-      logger.error(
+      logger.info(
         { group: group.name, containerName },
         'Container timeout, stopping gracefully',
       );
