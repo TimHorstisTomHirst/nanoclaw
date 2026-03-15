@@ -389,14 +389,25 @@ export async function processTaskIpc(
       const source = data.source as string;
       if (source && validSources.includes(source)) {
         const fetcherScript = path.join(
-          process.cwd(), 'scripts', 'fetchers', 'dist', `${source}-fetcher.js`
+          process.cwd(),
+          'scripts',
+          'fetchers',
+          'dist',
+          `${source}-fetcher.js`,
         );
         if (fs.existsSync(fetcherScript)) {
-          exec(`node ${fetcherScript}`, { timeout: 60000, cwd: process.cwd() }, (err) => {
-            if (err) logger.error({ source, err }, 'Data refresh failed');
-            else logger.info({ source }, 'Data refresh completed');
-          });
-          logger.info({ source, sourceGroup }, 'Data refresh triggered via IPC');
+          exec(
+            `node ${fetcherScript}`,
+            { timeout: 60000, cwd: process.cwd() },
+            (err) => {
+              if (err) logger.error({ source, err }, 'Data refresh failed');
+              else logger.info({ source }, 'Data refresh completed');
+            },
+          );
+          logger.info(
+            { source, sourceGroup },
+            'Data refresh triggered via IPC',
+          );
         } else {
           logger.warn({ source, fetcherScript }, 'Fetcher script not found');
         }

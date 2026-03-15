@@ -284,7 +284,10 @@ export class GroupQueue {
         'Max retries exceeded, dropping messages (will retry on next incoming message)',
       );
       this.onMaxRetriesExceeded?.(groupJid, state.retryCount).catch((err) =>
-        logger.error({ groupJid, err }, 'Error in onMaxRetriesExceeded callback'),
+        logger.error(
+          { groupJid, err },
+          'Error in onMaxRetriesExceeded callback',
+        ),
       );
       state.retryCount = 0;
       return;
