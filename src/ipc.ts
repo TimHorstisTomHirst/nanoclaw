@@ -468,13 +468,26 @@ export async function processTaskIpc(
 
       const triggerRefresh = () => {
         const fetcherScript = path.join(
-          process.cwd(), 'scripts', 'fetchers', 'dist', 'sunsama-fetcher.js',
+          process.cwd(),
+          'scripts',
+          'fetchers',
+          'dist',
+          'sunsama-fetcher.js',
         );
         if (fs.existsSync(fetcherScript)) {
-          execFile('node', [fetcherScript], { timeout: 60000, cwd: process.cwd() }, (err) => {
-            if (err) logger.error({ err }, 'Sunsama data refresh after write failed');
-            else logger.info('Sunsama data refreshed after write');
-          });
+          execFile(
+            'node',
+            [fetcherScript],
+            { timeout: 60000, cwd: process.cwd() },
+            (err) => {
+              if (err)
+                logger.error(
+                  { err },
+                  'Sunsama data refresh after write failed',
+                );
+              else logger.info('Sunsama data refreshed after write');
+            },
+          );
         }
       };
 
@@ -482,18 +495,26 @@ export async function processTaskIpc(
       const creds = readEnvFile(['SUNSAMA_EMAIL', 'SUNSAMA_PASSWORD']);
       if (!creds.SUNSAMA_EMAIL || !creds.SUNSAMA_PASSWORD) {
         logger.error('Sunsama credentials not configured in .env');
-        writeResult(data.type, 'error', { error: 'Credentials not configured' });
+        writeResult(data.type, 'error', {
+          error: 'Credentials not configured',
+        });
         break;
       }
 
       let client: SunsamaClient;
       try {
-        const resp = await fetch('https://api.sunsama.com/account/login/email', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: creds.SUNSAMA_EMAIL, password: creds.SUNSAMA_PASSWORD }),
-          redirect: 'manual',
-        });
+        const resp = await fetch(
+          'https://api.sunsama.com/account/login/email',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: creds.SUNSAMA_EMAIL,
+              password: creds.SUNSAMA_PASSWORD,
+            }),
+            redirect: 'manual',
+          },
+        );
         const setCookie = resp.headers.get('set-cookie') || '';
         const match = setCookie.match(/sunsamaSession=([^;]+)/);
         if (!match) throw new Error('No session cookie received');
@@ -507,7 +528,8 @@ export async function processTaskIpc(
       try {
         switch (data.type) {
           case 'sunsama_create_task': {
-            const text = typeof data.text === 'string' ? data.text.slice(0, 500) : null;
+            const text =
+              typeof data.text === 'string' ? data.text.slice(0, 500) : null;
             if (!text) {
               writeResult(data.type, 'error', { error: 'Missing task text' });
               break;
@@ -519,7 +541,11 @@ export async function processTaskIpc(
             if (data.notes) {
               opts.notes = { markdown: String(data.notes).slice(0, 2000) };
             }
-            if (typeof data.timeEstimate === 'number' && data.timeEstimate >= 1 && data.timeEstimate <= 1440) {
+            if (
+              typeof data.timeEstimate === 'number' &&
+              data.timeEstimate >= 1 &&
+              data.timeEstimate <= 1440
+            ) {
               opts.timeEstimate = data.timeEstimate;
             }
             if (data.streamId) {
@@ -533,82 +559,134 @@ export async function processTaskIpc(
           }
 
           case 'sunsama_complete_task': {
-            const taskId = typeof data.taskId === 'string' ? data.taskId.slice(0, 100) : null;
+            const taskId =
+              typeof data.taskId === 'string'
+                ? data.taskId.slice(0, 100)
+                : null;
             if (!taskId) {
               writeResult(data.type, 'error', { error: 'Missing taskId' });
               break;
             }
             await client.updateTaskComplete(taskId, new Date().toISOString());
-            logger.info({ sourceGroup, taskId }, 'Sunsama task completed via IPC');
+            logger.info(
+              { sourceGroup, taskId },
+              'Sunsama task completed via IPC',
+            );
             writeResult(data.type, 'success', { taskId });
             triggerRefresh();
             break;
           }
 
           case 'sunsama_uncomplete_task': {
-            const taskId = typeof data.taskId === 'string' ? data.taskId.slice(0, 100) : null;
+            const taskId =
+              typeof data.taskId === 'string'
+                ? data.taskId.slice(0, 100)
+                : null;
             if (!taskId) {
               writeResult(data.type, 'error', { error: 'Missing taskId' });
               break;
             }
             // sunsama-api may not have uncomplete — fall back to updateTaskComplete with null
             try {
-              await (client as unknown as { updateTaskUncomplete: (id: string) => Promise<unknown> }).updateTaskUncomplete(taskId);
+              await (
+                client as unknown as {
+                  updateTaskUncomplete: (id: string) => Promise<unknown>;
+                }
+              ).updateTaskUncomplete(taskId);
             } catch {
               // If method doesn't exist, this is a known limitation
-              writeResult(data.type, 'error', { error: 'Uncomplete not supported by current API version' });
+              writeResult(data.type, 'error', {
+                error: 'Uncomplete not supported by current API version',
+              });
               break;
             }
-            logger.info({ sourceGroup, taskId }, 'Sunsama task uncompleted via IPC');
+            logger.info(
+              { sourceGroup, taskId },
+              'Sunsama task uncompleted via IPC',
+            );
             writeResult(data.type, 'success', { taskId });
             triggerRefresh();
             break;
           }
 
           case 'sunsama_update_task': {
-            const taskId = typeof data.taskId === 'string' ? data.taskId.slice(0, 100) : null;
-            const validFields = ['snoozeDate', 'dueDate', 'notes', 'text', 'timeEstimate', 'stream'];
+            const taskId =
+              typeof data.taskId === 'string'
+                ? data.taskId.slice(0, 100)
+                : null;
+            const validFields = [
+              'snoozeDate',
+              'dueDate',
+              'notes',
+              'text',
+              'timeEstimate',
+              'stream',
+            ];
             const field = data.field;
             const value = data.value;
-            if (!taskId || !field || !validFields.includes(field) || value === undefined) {
-              writeResult(data.type, 'error', { error: 'Missing or invalid taskId, field, or value' });
+            if (
+              !taskId ||
+              !field ||
+              !validFields.includes(field) ||
+              value === undefined
+            ) {
+              writeResult(data.type, 'error', {
+                error: 'Missing or invalid taskId, field, or value',
+              });
               break;
             }
 
             switch (field) {
               case 'snoozeDate':
-                await client.updateTaskSnoozeDate(taskId, value === 'null' ? null : value);
+                await client.updateTaskSnoozeDate(
+                  taskId,
+                  value === 'null' ? null : value,
+                );
                 break;
               case 'dueDate':
                 await client.updateTaskDueDate(taskId, value);
                 break;
               case 'notes':
-                await client.updateTaskNotes(taskId, { markdown: value.slice(0, 2000) });
+                await client.updateTaskNotes(taskId, {
+                  markdown: value.slice(0, 2000),
+                });
                 break;
               case 'text':
                 await client.updateTaskText(taskId, value.slice(0, 500));
                 break;
               case 'timeEstimate':
-                await client.updateTaskPlannedTime(taskId, parseInt(value, 10) || 0);
+                await client.updateTaskPlannedTime(
+                  taskId,
+                  parseInt(value, 10) || 0,
+                );
                 break;
               case 'stream':
                 await client.updateTaskStream(taskId, value);
                 break;
             }
-            logger.info({ sourceGroup, taskId, field }, 'Sunsama task updated via IPC');
+            logger.info(
+              { sourceGroup, taskId, field },
+              'Sunsama task updated via IPC',
+            );
             writeResult(data.type, 'success', { taskId, field });
             triggerRefresh();
             break;
           }
 
           case 'sunsama_delete_task': {
-            const taskId = typeof data.taskId === 'string' ? data.taskId.slice(0, 100) : null;
+            const taskId =
+              typeof data.taskId === 'string'
+                ? data.taskId.slice(0, 100)
+                : null;
             if (!taskId) {
               writeResult(data.type, 'error', { error: 'Missing taskId' });
               break;
             }
             await client.deleteTask(taskId);
-            logger.info({ sourceGroup, taskId }, 'Sunsama task deleted via IPC');
+            logger.info(
+              { sourceGroup, taskId },
+              'Sunsama task deleted via IPC',
+            );
             writeResult(data.type, 'success', { taskId });
             triggerRefresh();
             break;
