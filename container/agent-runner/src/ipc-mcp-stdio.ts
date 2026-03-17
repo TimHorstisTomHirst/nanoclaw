@@ -248,7 +248,7 @@ server.tool(
   'refresh_data',
   'Request a fresh sync of external data. Data files update within 15-30 seconds.',
   {
-    source: z.enum(['calendar', 'slack', 'email', 'granola'])
+    source: z.enum(['calendar', 'slack', 'email', 'granola', 'sunsama'])
       .describe('Which data source to refresh'),
   },
   async (args) => {
@@ -264,6 +264,119 @@ server.tool(
         type: 'text' as const,
         text: `Refresh requested for ${args.source}. Data files will update within 15-30 seconds. Wait briefly, then read the data files.`,
       }],
+    };
+  },
+);
+
+server.tool(
+  'sunsama_create_task',
+  'Create a new task in Sunsama.',
+  {
+    text: z.string().max(500).describe('Task title'),
+    dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Due date (YYYY-MM-DD)'),
+    notes: z.string().max(2000).optional().describe('Task notes (markdown)'),
+    timeEstimate: z.number().int().min(1).max(1440).optional().describe('Time estimate in minutes'),
+    streamId: z.string().optional().describe('Stream/project ID from latest.json streams array'),
+  },
+  async (args) => {
+    const data = {
+      type: 'sunsama_create_task',
+      text: args.text,
+      dueDate: args.dueDate || undefined,
+      notes: args.notes || undefined,
+      timeEstimate: args.timeEstimate || undefined,
+      streamId: args.streamId || undefined,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(TASKS_DIR, data);
+    return {
+      content: [{ type: 'text' as const, text: 'Task creation requested. Check /workspace/extra/sunsama/last-write.json after 15 seconds to confirm.' }],
+    };
+  },
+);
+
+server.tool(
+  'sunsama_complete_task',
+  'Mark a Sunsama task as complete.',
+  {
+    taskId: z.string().describe('Task _id from latest.json'),
+  },
+  async (args) => {
+    const data = {
+      type: 'sunsama_complete_task',
+      taskId: args.taskId,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(TASKS_DIR, data);
+    return {
+      content: [{ type: 'text' as const, text: 'Task completion requested.' }],
+    };
+  },
+);
+
+server.tool(
+  'sunsama_uncomplete_task',
+  'Undo completion of a Sunsama task (mark it as not done).',
+  {
+    taskId: z.string().describe('Task _id from latest.json'),
+  },
+  async (args) => {
+    const data = {
+      type: 'sunsama_uncomplete_task',
+      taskId: args.taskId,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(TASKS_DIR, data);
+    return {
+      content: [{ type: 'text' as const, text: 'Task uncomplete requested.' }],
+    };
+  },
+);
+
+server.tool(
+  'sunsama_update_task',
+  'Update a field on a Sunsama task. For snoozeDate, use value "null" to move to backlog.',
+  {
+    taskId: z.string().describe('Task _id from latest.json'),
+    field: z.enum(['snoozeDate', 'dueDate', 'notes', 'text', 'timeEstimate', 'stream'])
+      .describe('Which field to update'),
+    value: z.string().describe('New value (dates as YYYY-MM-DD, timeEstimate as minutes, stream as stream _id)'),
+  },
+  async (args) => {
+    const data = {
+      type: 'sunsama_update_task',
+      taskId: args.taskId,
+      field: args.field,
+      value: args.value,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(TASKS_DIR, data);
+    return {
+      content: [{ type: 'text' as const, text: `Task update requested (${args.field}).` }],
+    };
+  },
+);
+
+server.tool(
+  'sunsama_delete_task',
+  'Delete a Sunsama task.',
+  {
+    taskId: z.string().describe('Task _id from latest.json'),
+  },
+  async (args) => {
+    const data = {
+      type: 'sunsama_delete_task',
+      taskId: args.taskId,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(TASKS_DIR, data);
+    return {
+      content: [{ type: 'text' as const, text: 'Task deletion requested.' }],
     };
   },
 );

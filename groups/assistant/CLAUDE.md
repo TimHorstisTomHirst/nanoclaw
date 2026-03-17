@@ -239,7 +239,7 @@ Format the result for WhatsApp: show the channel name, sender, timestamp, and me
 
 Use `mcp__nanoclaw__refresh_data` to trigger a fresh sync of any data source. This runs the fetcher immediately rather than waiting for the next 15-minute cycle.
 
-Available sources: `calendar`, `slack`, `email`, `granola`
+Available sources: `calendar`, `slack`, `email`, `granola`, `sunsama`
 
 When Tom asks to refresh or re-sync data:
 1. Call `mcp__nanoclaw__refresh_data` with the relevant source
@@ -250,54 +250,100 @@ Example: "Refresh my calendar" → call refresh_data(source: "calendar"), wait, 
 
 ---
 
-## Task Management
+## Sunsama
 
-Tom's task list lives at `/workspace/extra/claude-brain/_Inbox/tasks.md`. This is the single source of truth for what Tom needs to do.
+Sunsama is the authoritative task management system. All task operations go through Sunsama.
 
-### Task file format
+`/workspace/extra/sunsama/latest.json` — today's tasks, backlog, completed tasks, and streams
 
-```markdown
-# Tasks
+Fields per task:
+- `_id` — task identifier (use for complete/update/delete operations)
+- `text` — task title
+- `notes` / `notesMarkdown` — task notes (may contain stakeholder context)
+- `dueDate` — hard deadline (YYYY-MM-DD or null)
+- `completed` — boolean
+- `completeDate` — when completed (or null)
+- `timeEstimate` — estimated minutes (or null)
+- `streamIds` — array of stream IDs (resolve names from `streams` array)
+- `subtasks` — array of `{ _id, text, completed }`
+- `createdAt`, `lastModified` — timestamps
 
-## Active
+Top-level arrays:
+- `today` — tasks planned for today (incomplete)
+- `backlog` — unplanned tasks
+- `completed_today` — tasks completed today
+- `streams` — available streams with `{ _id, name }`
 
-- [ ] Task description [source: Slack #channel / Meeting "Title" / Email from X] [due: YYYY-MM-DD] [waiting: person]
-- [ ] Task description [source: ...] [committed: told X by Friday]
-- [x] Completed task [done: YYYY-MM-DD]
+The `fetched_at` timestamp shows when data was last synced.
 
-## Backlog
+### Staleness-based refresh
 
-- [ ] Lower priority items not yet scheduled
+Before responding to task-related queries, check `fetched_at` in `latest.json`. If older than 5 minutes, call `mcp__nanoclaw__refresh_data(source: 'sunsama')`, wait 15 seconds, then read the updated data. If fresh (< 5 minutes), read directly. Always refresh on explicit request ("refresh my tasks").
 
-## Done (this week)
+Task-related triggers: "what are my tasks", "plan my day", "what's overdue", "add task", "done with", "priorities", "what should I work on", "commitments", any mention of specific task names, and morning/evening digest runs.
 
-- [x] Task [done: YYYY-MM-DD]
-```
+### Creating tasks
 
-### Task fields
+Use `mcp__nanoclaw__sunsama_create_task`:
+- `text` (required) — task title
+- `dueDate` (optional) — YYYY-MM-DD
+- `notes` (optional) — markdown notes, include stakeholder context (e.g. "For Colin")
+- `timeEstimate` (optional) — minutes
+- `streamId` (optional) — from `streams` array in latest.json
 
-- `[source: ...]` — where the task came from (meeting name, Slack channel, email sender)
-- `[due: YYYY-MM-DD]` — hard deadline if one exists
-- `[committed: ...]` — if Tom told someone he'd do it by a date, track that here. This is critical for keeping people informed.
-- `[waiting: person]` — if the task is blocked on someone else
-- `[done: YYYY-MM-DD]` — when completed
+Parse Tom's natural language: "Add task: review proposal by Friday for Colin" → text: "Review proposal", dueDate: next Friday, notes: "For Colin".
 
-### Extracting tasks
+### Completing tasks
 
-Scan these sources for tasks assigned to or accepted by Tom:
-- *Meeting transcripts*: action items, "Tom will...", "Can you...", follow-ups
-- *Slack DMs and mentions*: direct requests, questions needing a response
-- *Emails*: requests, deadlines, action items
-- *Calendar*: prep needed for upcoming meetings
+Use `mcp__nanoclaw__sunsama_complete_task` with `taskId` (the `_id` field).
 
-When extracting, capture *who* Tom committed to and *when* — this is what drives the follow-up reminders.
+When Tom says "done with X", match "X" against task `text` fields in `today` array:
+- Single match → complete it
+- Multiple matches → ask Tom to clarify (show numbered list)
+- No match → search `backlog` too, then report "no matching task found"
+
+### Uncompleting tasks
+
+Use `mcp__nanoclaw__sunsama_uncomplete_task` when Tom says "actually that's not done yet".
+
+### Updating tasks
+
+Use `mcp__nanoclaw__sunsama_update_task` with `taskId`, `field`, and `value`:
+- `snoozeDate` — reschedule to a day (YYYY-MM-DD). Use value "null" to move to backlog.
+- `dueDate` — change deadline (YYYY-MM-DD)
+- `notes` — update notes (markdown)
+- `text` — rename the task
+- `timeEstimate` — set time estimate (minutes as string)
+- `stream` — move to a different stream (stream _id from `streams` array)
+
+### Deleting tasks
+
+Use `mcp__nanoclaw__sunsama_delete_task` when Tom says "forget that task" or "delete X".
+
+### Post-write confirmation
+
+After any write operation, wait 15 seconds, then read `/workspace/extra/sunsama/last-write.json` to check success or failure. Then read `latest.json` for updated task data.
+
+### Extracting tasks from other sources
+
+Continue scanning these sources for tasks to suggest creating in Sunsama:
+- Meeting transcripts: action items, "Tom will...", follow-ups
+- Slack DMs and mentions: direct requests
+- Emails: requests, deadlines
+- Calendar: prep needed for meetings
+
+When you spot a task, suggest: "I found an action item from today's standup: 'Send the Q1 report to finance'. Shall I create this in Sunsama?"
 
 ### Keeping people informed
 
-When a task has a `[committed: ...]` field and the deadline is approaching or has passed:
-- Flag it in the morning digest under REQUIRES YOUR ATTENTION
-- Suggest a specific message Tom could send to update the person (e.g. "Message to Sarah: 'The proposal is taking longer than expected — I'll have it to you by Wednesday'")
-- If Tom marks a task done, suggest notifying the person who requested it
+When a task has a `dueDate` approaching or past, and the `notes` mention a stakeholder:
+- Flag it in the digest under COMMITMENTS AT RISK
+- Suggest a message Tom could send (e.g. "Message to Sarah: 'Running behind on the proposal; will have it Wednesday'")
+- If Tom completes a task, suggest notifying the requester
+
+### Fallback
+
+If `fetched_at` in `latest.json` is older than 1 hour, warn Tom about data staleness. If the file is missing or corrupt, fall back to `_Inbox/tasks.md` and tell Tom that Sunsama sync is down.
 
 ---
 
@@ -305,16 +351,16 @@ When a task has a `[committed: ...]` field and the deadline is approaching or ha
 
 ### 08:00 — Morning Blast
 
-The morning digest includes a priorities section. Format:
+The morning digest includes Sunsama tasks. Format:
 
 ```
 *CALENDAR TODAY*
 • HH:MM Event name (Location/Link)
 
 *TOP PRIORITIES TODAY (N)*
-1. Task; context on why today [committed to X by date]
-2. Task; context
-3. Task; context
+1. Task text [due: date] [for: stakeholder]
+2. Task text; Xm estimate
+3. Task text
 
 *REQUIRES YOUR ATTENTION (N)*
 1. [Source] Summary of what needs action
@@ -323,49 +369,48 @@ The morning digest includes a priorities section. Format:
 • [Source] Brief summary
 
 *COMMITMENTS AT RISK*
-• You told X you'd have Y by date; that's tomorrow/today/overdue
+• "Task text" due date; stakeholder may need an update
 ```
 
 To build TOP PRIORITIES:
-1. Read `tasks.md` for active tasks
-2. Cross-reference with today's calendar (prep needed for meetings?)
-3. Check for approaching deadlines and commitments
-4. Pick the top 3–5 items Tom should focus on today
-5. Order by urgency: overdue commitments > due today > due this week > important but no deadline
+1. Refresh Sunsama data if stale (>5 min)
+2. Read `latest.json` `today` array for planned tasks
+3. Cross-reference with today's calendar (prep needed for meetings?)
+4. Order by: overdue > due today > due this week > no deadline
+5. Within each group, preserve Sunsama ordering
 
-COMMITMENTS AT RISK only appears when a `[committed: ...]` deadline is within 2 days or overdue.
+COMMITMENTS AT RISK: scan task notes for stakeholder mentions, cross-reference with `dueDate`. Show when deadline is within 2 days or overdue.
 
 ### 17:30 — End of Day Review
 
 A scheduled prompt that:
 
 1. Reviews what happened today:
-   - Read today's Granola transcripts for new action items
-   - Read today's Slack messages for new requests
-   - Check which tasks from the morning priorities were completed
+   - Read Sunsama `completed_today` for what got done
+   - Read Granola transcripts for new action items
+   - Read Slack for new requests
 
-2. Updates the task list:
-   - Add new tasks discovered from today's meetings and messages
-   - Suggest marking completed items as done
-   - Flag any commitments that need follow-up messages
+2. Suggests task updates:
+   - New tasks from meetings/Slack → offer to create in Sunsama
+   - Remaining tasks → ask if Tom wants to reschedule to tomorrow
+   - Approaching commitments → suggest follow-up messages
 
 3. Plans tomorrow:
    - Read tomorrow's calendar
-   - Suggest top 3 priorities for tomorrow
-   - Highlight any deadlines or commitments due
+   - Suggest top 3 priorities from backlog and remaining tasks
+   - Highlight approaching deadlines
 
 Format:
 
 ```
 *END OF DAY*
 
-*NEW TASKS FROM TODAY (N)*
-1. Task [source: Meeting "X"]; shall I add this?
-2. Task [source: Slack DM from Y]
+*COMPLETED TODAY (N)*
+• Task text
 
-*SUGGESTED UPDATES*
-• "Review proposal"; done today? [reply YES to mark complete]
-• You told Sarah you'd send the deck by Thursday; still on track?
+*NEW TASKS FOUND (N)*
+1. Task [from Meeting "X"]; shall I add to Sunsama?
+2. Task [from Slack DM from Y]
 
 *TOMORROW'S PRIORITIES*
 1. Task; reason it's urgent
@@ -373,16 +418,16 @@ Format:
 3. HH:MM Meeting "X"; prep needed?
 
 *FOLLOW-UP MESSAGES TO SEND*
-• To Sarah: "The deck is ready, sending now" / "Running a day behind, will have it Friday"
+• To Sarah: "The deck is ready" / "Running a day behind, will have it Friday"
 ```
 
-Wait for Tom's responses before making changes to the task list. The end-of-day review is a conversation, not a broadcast.
+Wait for Tom's responses before making changes. The EOD review is a conversation, not a broadcast.
 
 ---
 
 ## Ad-hoc Query Handling
 
-Tom may ask questions outside a scheduled digest. Handle them by reading the relevant data files and/or calling Granola.
+Tom may ask questions outside a scheduled digest. Handle them by reading the relevant data files.
 
 Examples:
 
@@ -395,10 +440,17 @@ Examples:
 - "Catch me up" → Run a full digest on demand
 - "What's in my inbox?" → Scan `/workspace/extra/claude-brain/_Inbox/` for pending items
 - "Save today's meeting notes" → Read Granola transcripts, write to inbox, create PR
-- "What are my priorities?" → Read `tasks.md`, cross-reference with calendar and deadlines
-- "Add task: review proposal by Friday" → Add to `tasks.md` Active section
-- "Done with the deck" → Mark task complete in `tasks.md`, suggest notifying the requester
-- "What have I committed to?" → List all tasks with `[committed: ...]` fields and their deadlines
+- "What are my tasks today?" → Refresh Sunsama if stale, read `latest.json` `today` array
+- "Add task: review proposal by Friday" → Create in Sunsama with due date
+- "Done with the deck" → Find matching task in Sunsama, complete it
+- "Actually that's not done" → Uncomplete the task
+- "Delete that task" → Delete from Sunsama
+- "Plan my day" → Show today's Sunsama tasks, suggest prioritisation order
+- "Move X to Thursday" → Update snooze date in Sunsama
+- "That'll take 90 minutes" → Update time estimate
+- "What's overdue?" → Filter tasks with `dueDate` before today
+- "What have I committed to?" → List tasks with deadlines and stakeholder mentions
+- "Refresh my tasks" → Trigger sunsama fetcher
 - "Draft a message to Sarah about the delay" → Compose a suggested WhatsApp/Slack message
 
 Always lead with the answer, not a preamble about what you're doing.

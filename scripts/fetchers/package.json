@@ -8,12 +8,14 @@
     "fetch:slack": "node dist/slack-fetcher.js",
     "fetch:email": "node dist/email-fetcher.js",
     "fetch:calendar": "node dist/calendar-fetcher.js",
-    "fetch:granola": "node dist/granola-fetcher.js"
+    "fetch:granola": "node dist/granola-fetcher.js",
+    "fetch:sunsama": "node dist/sunsama-fetcher.js"
   },
   "dependencies": {
     "@slack/web-api": "^7.8.0",
+    "dotenv": "^16.4.7",
     "googleapis": "^144.0.0",
-    "dotenv": "^16.4.7"
+    "sunsama-api": "0.14.0"
   },
   "engines": {
     "node": ">=20"
